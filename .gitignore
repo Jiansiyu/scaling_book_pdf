@@ -1,0 +1,9 @@
+# Upstream working clone created during local/CI builds
+upstream/
+
+# Intermediate artifacts
+scaling-book-combined.md
+*.aux
+*.log
+*.out
+*.toc

@@ -1,0 +1,147 @@
+name: Build Scaling Book PDF
+
+# Runs once a day. It checks whether the upstream book repo
+# (https://github.com/jax-ml/scaling-book) has a new commit on `main`.
+# If nothing changed since the last build, it skips. Otherwise it clones
+# upstream, builds a PDF, and commits the PDF back into this repo.
+
+on:
+  schedule:
+    # 06:00 UTC every day. Adjust as you like (https://crontab.guru).
+    - cron: "0 6 * * *"
+  # Allow running it by hand from the Actions tab.
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Force a rebuild even if upstream has no new commit"
+        type: boolean
+        default: false
+
+# Needed so the workflow can push the built PDF back to this repo.
+permissions:
+  contents: write
+
+concurrency:
+  group: build-pdf
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_URL: https://github.com/jax-ml/scaling-book.git
+  UPSTREAM_BRANCH: main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Get latest upstream commit SHA
+        id: upstream
+        run: |
+          SHA="$(git ls-remote "$UPSTREAM_URL" "refs/heads/$UPSTREAM_BRANCH" | cut -f1)"
+          if [ -z "$SHA" ]; then
+            echo "Could not read upstream SHA" >&2
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Latest upstream SHA: $SHA"
+
+      - name: Read last built SHA
+        id: last
+        run: |
+          if [ -f .last_build_sha ]; then
+            echo "sha=$(cat .last_build_sha)" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=none" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Decide whether to build
+        id: decide
+        run: |
+          FORCE="${{ github.event.inputs.force }}"
+          if [ "$FORCE" = "true" ]; then
+            echo "Forced rebuild requested."
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ steps.upstream.outputs.sha }}" = "${{ steps.last.outputs.sha }}" ]; then
+            echo "No new upstream commit (still ${{ steps.last.outputs.sha }}). Skipping build."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New upstream commit detected. Building."
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Clone upstream at latest main
+        if: steps.decide.outputs.build == 'true'
+        run: git clone --depth 1 --branch "$UPSTREAM_BRANCH" "$UPSTREAM_URL" upstream
+
+      - name: Set up Python
+        if: steps.decide.outputs.build == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install pandoc, XeLaTeX and ImageMagick
+        if: steps.decide.outputs.build == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pandoc \
+            texlive-xetex \
+            texlive-latex-extra \
+            texlive-fonts-recommended \
+            texlive-fonts-extra \
+            lmodern \
+            librsvg2-bin \
+            imagemagick
+
+      - name: Generate combined markdown
+        if: steps.decide.outputs.build == 'true'
+        working-directory: upstream
+        run: python bin/convert_to_single_md.py
+
+      - name: Flatten animated GIFs to PNG
+        if: steps.decide.outputs.build == 'true'
+        working-directory: upstream
+        run: |
+          # LaTeX cannot embed (animated) GIFs, so convert the first frame
+          # of each GIF to PNG and repoint the references in the combined file.
+          shopt -s globstar nullglob
+          for f in assets/**/*.gif; do
+            echo "Converting $f -> ${f%.gif}.png"
+            convert "${f}[0]" "${f%.gif}.png"
+          done
+          sed -i 's/\.gif/\.png/g' scaling-book-combined.md
+
+      - name: Build PDF
+        if: steps.decide.outputs.build == 'true'
+        working-directory: upstream
+        run: |
+          pandoc scaling-book-combined.md \
+            -o ../scaling-book.pdf \
+            --pdf-engine=xelatex \
+            --toc \
+            --toc-depth=2 \
+            -V geometry:margin=1in \
+            -V colorlinks=true \
+            -V linkcolor=blue \
+            -V urlcolor=blue \
+            -V documentclass=report \
+            --resource-path=".:assets" \
+            --metadata title="How to Scale Your Model" \
+            --metadata author="Austin et al., Google DeepMind" \
+            --metadata date="Built from upstream ${{ steps.upstream.outputs.sha }}"
+
+      - name: Commit and push PDF
+        if: steps.decide.outputs.build == 'true'
+        run: |
+          echo "${{ steps.upstream.outputs.sha }}" > .last_build_sha
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add scaling-book.pdf .last_build_sha
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Rebuild PDF from upstream ${{ steps.upstream.outputs.sha }}"
+            git push
+          fi
