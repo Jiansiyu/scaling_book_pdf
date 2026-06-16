@@ -1,0 +1,28 @@
+% Extra LaTeX preamble for the scaling-book PDF build.
+% Loaded via: pandoc --include-in-header build/preamble.tex
+%
+% Keep this dependency-light: only packages that ship with the pinned
+% pandoc/latex image. Unicode glyph handling lives in preprocess.py instead of
+% relying on newunicodechar (which is not in the image), so a missing package
+% can never turn into a fatal build error.
+
+\usepackage{xcolor}   % no options -> no clash if the template already loaded it
+\usepackage{amssymb}  % \checkmark etc.; harmless if already loaded
+
+% --- MathJax-only macros that LaTeX does not define ----------------------
+% The book uses these inside math; \providecommand means "define only if not
+% already defined", so they never clash with the book's own inline \def's.
+\providecommand{\red}[1]{\textcolor{red}{#1}}
+\providecommand{\green}[1]{\textcolor{green!55!black}{#1}}
+\providecommand{\blue}[1]{\textcolor{blue}{#1}}
+\providecommand{\purple}[1]{\textcolor{purple}{#1}}
+\providecommand{\orange}[1]{\textcolor{orange}{#1}}
+\providecommand{\gray}[1]{\textcolor{gray}{#1}}
+\providecommand{\gt}{>}
+\providecommand{\lt}{<}
+
+% Other MathJax/AMS conveniences that may appear in math (harmless if unused).
+\providecommand{\argmax}{\operatorname*{arg\,max}}
+\providecommand{\argmin}{\operatorname*{arg\,min}}
+\providecommand{\sgn}{\operatorname{sgn}}
+\providecommand{\bm}[1]{\boldsymbol{#1}}

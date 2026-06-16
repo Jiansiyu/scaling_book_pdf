@@ -1,27 +1,24 @@
 name: Build Scaling Book PDF
 
-# Runs once a day. It checks whether the upstream book repo
+# Once a day: check whether the upstream book repo
 # (https://github.com/jax-ml/scaling-book) has a new commit on `main`.
-# If nothing changed since the last build, it skips. Otherwise it clones
-# upstream, builds a PDF, and commits the PDF back into this repo.
+# If nothing changed since the last build, skip. Otherwise clone upstream,
+# build a PDF, upload it as an artifact, and (optionally) commit it to this repo.
 
 on:
   schedule:
-    # 06:00 UTC every day. Adjust as you like (https://crontab.guru).
-    - cron: "0 6 * * *"
-  # Allow running it by hand from the Actions tab.
+    - cron: "0 6 * * *"          # 06:00 UTC daily (https://crontab.guru)
   workflow_dispatch:
     inputs:
       force:
-        description: "Force a rebuild even if upstream has no new commit"
+        description: "Build even if upstream has no new commit"
         type: boolean
         default: true
       commit_pdf:
-        description: "Commit the PDF back to this repo (leave off while testing — PDF is always uploaded as an artifact)"
+        description: "Commit the PDF back to this repo (off = artifact only, for testing)"
         type: boolean
         default: false
 
-# Needed so the workflow can push the built PDF back to this repo.
 permissions:
   contents: write
 
@@ -32,6 +29,7 @@ concurrency:
 env:
   UPSTREAM_URL: https://github.com/jax-ml/scaling-book.git
   UPSTREAM_BRANCH: main
+  PANDOC_VERSION: "3.10"          # pinned: older pandoc mishandles the book's math
 
 jobs:
   build:
@@ -44,35 +42,26 @@ jobs:
         id: upstream
         run: |
           SHA="$(git ls-remote "$UPSTREAM_URL" "refs/heads/$UPSTREAM_BRANCH" | cut -f1)"
-          if [ -z "$SHA" ]; then
-            echo "Could not read upstream SHA" >&2
-            exit 1
-          fi
+          [ -n "$SHA" ] || { echo "Could not read upstream SHA" >&2; exit 1; }
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "Latest upstream SHA: $SHA"
 
       - name: Read last built SHA
         id: last
         run: |
-          if [ -f .last_build_sha ]; then
-            echo "sha=$(cat .last_build_sha)" >> "$GITHUB_OUTPUT"
-          else
-            echo "sha=none" >> "$GITHUB_OUTPUT"
-          fi
+          if [ -f .last_build_sha ]; then echo "sha=$(cat .last_build_sha)" >> "$GITHUB_OUTPUT";
+          else echo "sha=none" >> "$GITHUB_OUTPUT"; fi
 
       - name: Decide whether to build
         id: decide
         run: |
-          FORCE="${{ github.event.inputs.force }}"
-          if [ "$FORCE" = "true" ]; then
-            echo "Forced rebuild requested."
-            echo "build=true" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            echo "Forced rebuild."; echo "build=true" >> "$GITHUB_OUTPUT"
           elif [ "${{ steps.upstream.outputs.sha }}" = "${{ steps.last.outputs.sha }}" ]; then
-            echo "No new upstream commit (still ${{ steps.last.outputs.sha }}). Skipping build."
+            echo "No new upstream commit (${{ steps.last.outputs.sha }}). Skipping."
             echo "build=false" >> "$GITHUB_OUTPUT"
           else
-            echo "New upstream commit detected. Building."
-            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "New upstream commit. Building."; echo "build=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Clone upstream at latest main
@@ -85,75 +74,32 @@ jobs:
         with:
           python-version: "3.x"
 
-      - name: Install pandoc, XeLaTeX and ImageMagick
+      - name: Install pandoc, XeLaTeX, ImageMagick, poppler
         if: steps.decide.outputs.build == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            pandoc \
-            texlive-xetex \
-            texlive-latex-extra \
-            texlive-fonts-recommended \
-            texlive-fonts-extra \
-            lmodern \
-            librsvg2-bin \
-            imagemagick
-
-      - name: Generate combined markdown
-        if: steps.decide.outputs.build == 'true'
-        working-directory: upstream
-        run: python bin/convert_to_single_md.py
-
-      - name: Flatten animated GIFs to PNG
-        if: steps.decide.outputs.build == 'true'
-        working-directory: upstream
-        run: |
-          # LaTeX cannot embed (animated) GIFs, so convert the first frame
-          # of each GIF to PNG and repoint the references in the combined file.
-          shopt -s globstar nullglob
-          for f in assets/**/*.gif; do
-            echo "Converting $f -> ${f%.gif}.png"
-            convert "${f}[0]" "${f%.gif}.png"
-          done
-          sed -i 's/\.gif/\.png/g' scaling-book-combined.md
-
-      - name: Fix display-math environments
-        if: steps.decide.outputs.build == 'true'
-        working-directory: upstream
-        run: |
-          # Top-level math environments (equation/align) must NOT be wrapped in
-          # $$ ... $$, or pandoc emits \[ \begin{equation} ... \] which LaTeX
-          # rejects with "Bad math environment delimiter". Strip the $$ that hug
-          # these environments; leave aligned/pmatrix/etc. (which need math mode).
-          sed -i -E 's/\$\$(\\begin\{(equation|equation\*|align|align\*)\})/\1/g' scaling-book-combined.md
-          sed -i -E 's/(\\end\{(equation|equation\*|align|align\*)\})\$\$/\1/g' scaling-book-combined.md
+            texlive-xetex texlive-latex-extra \
+            texlive-fonts-recommended texlive-fonts-extra lmodern \
+            imagemagick poppler-utils
+          curl -fsSL -o /tmp/pandoc.deb \
+            "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-amd64.deb"
+          sudo dpkg -i /tmp/pandoc.deb
+          pandoc --version | head -1
 
       - name: Build PDF
         if: steps.decide.outputs.build == 'true'
-        working-directory: upstream
-        run: |
-          pandoc scaling-book-combined.md \
-            -o ../scaling-book.pdf \
-            --pdf-engine=xelatex \
-            --toc \
-            --toc-depth=2 \
-            -V geometry:margin=1in \
-            -V colorlinks=true \
-            -V linkcolor=blue \
-            -V urlcolor=blue \
-            -V documentclass=report \
-            --resource-path=".:assets" \
-            --metadata title="How to Scale Your Model" \
-            --metadata author="Austin et al., Google DeepMind" \
-            --metadata date="Built from upstream ${{ steps.upstream.outputs.sha }}"
+        run: bash build/build.sh upstream scaling-book.pdf
 
-      # Always keep the combined markdown around for debugging, even on failure.
-      - name: Upload combined markdown (debug)
+      # Always keep build diagnostics, even if the build step failed.
+      - name: Upload build logs (debug)
         if: steps.decide.outputs.build == 'true' && always()
         uses: actions/upload-artifact@v4
         with:
-          name: scaling-book-combined-md
-          path: upstream/scaling-book-combined.md
+          name: build-logs
+          path: |
+            upstream/scaling-book-combined.md
+            upstream/xelatex-pass2.log
           if-no-files-found: ignore
 
       - name: Upload PDF artifact
@@ -164,9 +110,8 @@ jobs:
           path: scaling-book.pdf
           if-no-files-found: error
 
-      # Disabled while testing. Flip the "commit_pdf" input to true (or set it
-      # as the default) once you're happy with the PDF, and this will start
-      # committing scaling-book.pdf + .last_build_sha back into the repo.
+      # Disabled while testing. Set commit_pdf=true (or change its default) to
+      # start committing scaling-book.pdf + .last_build_sha into this repo.
       - name: Commit and push PDF
         if: steps.decide.outputs.build == 'true' && github.event.inputs.commit_pdf == 'true'
         run: |
