@@ -10,7 +10,7 @@ once enabled, committed to [`scaling-book.pdf`](scaling-book.pdf).
 
 A scheduled GitHub Action ([`.github/workflows/build-pdf.yml`](.github/workflows/build-pdf.yml)):
 
-1. Runs **once a day** (and on-demand from the Actions tab).
+1. Runs **weekly on Monday** (and on-demand from the Actions tab).
 2. Reads the latest commit SHA on upstream `main` with `git ls-remote` (cheap — no clone).
 3. Compares it against `.last_build_sha`.
    - **No change** → skips the build entirely.
@@ -47,7 +47,7 @@ visible even when the build still succeeds.
 
 ## Configuration
 
-- **Schedule:** edit the `cron` line in the workflow (`0 6 * * *` = 06:00 UTC daily).
+- **Schedule:** edit the `cron` line in the workflow (`0 6 * * 1` = Mondays 06:00 UTC).
 - **Force a rebuild / commit:** Actions → *Build Scaling Book PDF* → *Run workflow*,
   then toggle `force` / `commit_pdf`.
 - **Pandoc version:** pinned via `PANDOC_VERSION` (older pandoc mishandles the math).
