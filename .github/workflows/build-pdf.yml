@@ -15,6 +15,10 @@ on:
       force:
         description: "Force a rebuild even if upstream has no new commit"
         type: boolean
+        default: true
+      commit_pdf:
+        description: "Commit the PDF back to this repo (leave off while testing — PDF is always uploaded as an artifact)"
+        type: boolean
         default: false
 
 # Needed so the workflow can push the built PDF back to this repo.
@@ -132,8 +136,28 @@ jobs:
             --metadata author="Austin et al., Google DeepMind" \
             --metadata date="Built from upstream ${{ steps.upstream.outputs.sha }}"
 
-      - name: Commit and push PDF
+      # Always keep the combined markdown around for debugging, even on failure.
+      - name: Upload combined markdown (debug)
+        if: steps.decide.outputs.build == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scaling-book-combined-md
+          path: upstream/scaling-book-combined.md
+          if-no-files-found: ignore
+
+      - name: Upload PDF artifact
         if: steps.decide.outputs.build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: scaling-book-pdf
+          path: scaling-book.pdf
+          if-no-files-found: error
+
+      # Disabled while testing. Flip the "commit_pdf" input to true (or set it
+      # as the default) once you're happy with the PDF, and this will start
+      # committing scaling-book.pdf + .last_build_sha back into the repo.
+      - name: Commit and push PDF
+        if: steps.decide.outputs.build == 'true' && github.event.inputs.commit_pdf == 'true'
         run: |
           echo "${{ steps.upstream.outputs.sha }}" > .last_build_sha
           git config user.name "github-actions[bot]"
