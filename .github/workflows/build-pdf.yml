@@ -101,6 +101,7 @@ jobs:
             upstream/scaling-book-combined.md
             upstream/xelatex-pass2.log
           if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload PDF artifact
         if: steps.decide.outputs.build == 'true'
@@ -109,6 +110,7 @@ jobs:
           name: scaling-book-pdf
           path: scaling-book.pdf
           if-no-files-found: error
+          retention-days: 7
 
       # Disabled while testing. Set commit_pdf=true (or change its default) to
       # start committing scaling-book.pdf + .last_build_sha into this repo.
