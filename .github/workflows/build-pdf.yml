@@ -13,7 +13,7 @@ on:
       force:
         description: "Build even if upstream has no new commit"
         type: boolean
-        default: true
+        default: false
       commit_pdf:
         description: "Commit the PDF back to this repo (off = artifact only, for testing)"
         type: boolean
@@ -112,10 +112,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      # Disabled while testing. Set commit_pdf=true (or change its default) to
-      # start committing scaling-book.pdf + .last_build_sha into this repo.
+      # Commit scaling-book.pdf + .last_build_sha back into this repo.
+      # On scheduled runs commit_pdf is empty, so '!= false' enables it there;
+      # set commit_pdf=false on a manual dispatch to build an artifact only.
       - name: Commit and push PDF
-        if: steps.decide.outputs.build == 'true' && github.event.inputs.commit_pdf == 'true'
+        if: steps.decide.outputs.build == 'true' && github.event.inputs.commit_pdf != 'false'
         run: |
           echo "${{ steps.upstream.outputs.sha }}" > .last_build_sha
           git config user.name "github-actions[bot]"
