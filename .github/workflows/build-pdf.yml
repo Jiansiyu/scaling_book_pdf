@@ -1,13 +1,14 @@
 name: Build Scaling Book PDF
 
-# Weekly (Mondays): check whether the upstream book repo
+# Daily: check whether the upstream book repo
 # (https://github.com/jax-ml/scaling-book) has a new commit on `main`.
-# If nothing changed since the last build, skip. Otherwise clone upstream,
-# build a PDF, upload it as an artifact, and (optionally) commit it to this repo.
+# If nothing changed since the last build, skip (cheap SHA check only).
+# Otherwise clone upstream, build a PDF, upload it as an artifact, and
+# (optionally) commit it to this repo.
 
 on:
   schedule:
-    - cron: "0 6 * * 1"          # Mondays 06:00 UTC, weekly (https://crontab.guru)
+    - cron: "0 6 * * *"          # daily 06:00 UTC (https://crontab.guru)
   workflow_dispatch:
     inputs:
       force:
